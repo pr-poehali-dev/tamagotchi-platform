@@ -1,0 +1,17 @@
+{
+  "tests": [
+    {
+      "name": "Test get trade offers",
+      "method": "GET",
+      "path": "/",
+      "queryStringParameters": {
+        "user_id": "1"
+      },
+      "expectedStatus": 200,
+      "expectedBody": {
+        "offers": "array"
+      },
+      "bodyMatcher": "partial"
+    }
+  ]
+}

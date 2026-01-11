@@ -1,0 +1,19 @@
+{
+  "tests": [
+    {
+      "name": "Test feed pet",
+      "method": "POST",
+      "path": "/",
+      "body": {
+        "action": "feed",
+        "user_id": 1
+      },
+      "expectedStatus": 200,
+      "expectedBody": {
+        "hunger": "number",
+        "happiness": "number"
+      },
+      "bodyMatcher": "partial"
+    }
+  ]
+}

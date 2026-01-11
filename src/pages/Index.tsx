@@ -1,16 +1,35 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import Icon from '@/components/ui/icon';
 import { useToast } from '@/hooks/use-toast';
+
+const AUTH_URL = 'https://functions.poehali.dev/c60db1a5-4bb2-415d-b418-0a4603b72822';
+const PET_URL = 'https://functions.poehali.dev/5ab16b82-ac41-4602-96f8-9efdb2ecdb1b';
+const TRADE_URL = 'https://functions.poehali.dev/750b5986-c508-4f18-b3d3-9de01b82d2d6';
 
 const Index = () => {
   const { toast } = useToast();
   const [activeTab, setActiveTab] = useState('home');
+  const [showAuth, setShowAuth] = useState(true);
+  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+  const [user, setUser] = useState<any>(null);
+  const [tradeOffers, setTradeOffers] = useState<any[]>([]);
+  const [showTradeDialog, setShowTradeDialog] = useState(false);
+  const [selectedItem, setSelectedItem] = useState<any>(null);
   
+  const [authForm, setAuthForm] = useState({
+    email: '',
+    password: '',
+    username: ''
+  });
+
   const [petStats, setPetStats] = useState({
     hunger: 75,
     happiness: 80,
@@ -44,54 +63,228 @@ const Index = () => {
     { id: 2, name: 'Поиграй 5 раз', progress: 3, goal: 5, reward: 75, icon: 'Gamepad2' },
   ]);
 
-  const feedPet = () => {
+  useEffect(() => {
+    const savedUser = localStorage.getItem('tamagotchi_user');
+    if (savedUser) {
+      const userData = JSON.parse(savedUser);
+      setUser(userData);
+      setShowAuth(false);
+      loadPetData(userData.id);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (user && activeTab === 'trade') {
+      loadTradeOffers();
+    }
+  }, [user, activeTab]);
+
+  const loadPetData = async (userId: number) => {
+    try {
+      const response = await fetch(`${PET_URL}?user_id=${userId}`);
+      const data = await response.json();
+      
+      if (data.pet) {
+        setPetStats({
+          hunger: data.pet.hunger,
+          happiness: data.pet.happiness,
+          health: data.pet.health,
+          energy: data.pet.energy,
+          coins: data.user.coins,
+          level: data.user.level,
+          xp: data.user.xp,
+          xpToNext: 600
+        });
+      }
+      
+      if (data.inventory) {
+        const inv = data.inventory.map((item: any, idx: number) => ({
+          id: idx,
+          name: item.name,
+          type: item.type,
+          effect: item.effect,
+          icon: item.type === 'food' ? 'Apple' : 'CircleDot'
+        }));
+        setInventory(inv);
+      }
+      
+      if (data.achievements) {
+        const achs = data.achievements.map((a: any, idx: number) => ({
+          id: idx,
+          name: a.name,
+          description: a.name,
+          completed: a.completed,
+          icon: 'Award'
+        }));
+        setAchievements(achs);
+      }
+      
+      if (data.quests) {
+        const qsts = data.quests.map((q: any, idx: number) => ({
+          id: idx,
+          name: q.name,
+          progress: q.progress,
+          goal: q.goal,
+          reward: q.reward,
+          icon: 'Target'
+        }));
+        setQuests(qsts);
+      }
+    } catch (error) {
+      console.error('Ошибка загрузки данных:', error);
+    }
+  };
+
+  const loadTradeOffers = async () => {
+    try {
+      const response = await fetch(`${TRADE_URL}?user_id=${user.id}`);
+      const data = await response.json();
+      if (data.offers) {
+        setTradeOffers(data.offers);
+      }
+    } catch (error) {
+      console.error('Ошибка загрузки торговых предложений:', error);
+    }
+  };
+
+  const handleAuth = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    try {
+      const response = await fetch(AUTH_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: authMode,
+          email: authForm.email,
+          password: authForm.password,
+          username: authMode === 'register' ? authForm.username : undefined
+        })
+      });
+      
+      const data = await response.json();
+      
+      if (data.error) {
+        toast({ title: '❌ Ошибка', description: data.error, variant: 'destructive' });
+        return;
+      }
+      
+      if (data.success && data.user) {
+        setUser(data.user);
+        localStorage.setItem('tamagotchi_user', JSON.stringify(data.user));
+        localStorage.setItem('tamagotchi_token', data.token);
+        setShowAuth(false);
+        loadPetData(data.user.id);
+        toast({ 
+          title: '✅ Успешно!', 
+          description: authMode === 'login' ? 'Вы вошли в аккаунт' : 'Регистрация завершена' 
+        });
+      }
+    } catch (error) {
+      toast({ title: '❌ Ошибка', description: 'Не удалось подключиться к серверу', variant: 'destructive' });
+    }
+  };
+
+  const feedPet = async () => {
+    if (!user) return;
     if (petStats.hunger >= 100) {
       toast({ title: '😊 Питомец сыт!', description: 'Ему не нужна еда сейчас' });
       return;
     }
-    setPetStats(prev => ({
-      ...prev,
-      hunger: Math.min(100, prev.hunger + 20),
-      happiness: Math.min(100, prev.happiness + 5),
-      xp: prev.xp + 10
-    }));
-    toast({ title: '🍎 Ням-ням!', description: '+20 сытости, +5 счастья' });
+    
+    try {
+      const response = await fetch(PET_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'feed', user_id: user.id })
+      });
+      const data = await response.json();
+      
+      setPetStats(prev => ({
+        ...prev,
+        hunger: data.hunger,
+        happiness: data.happiness,
+        xp: data.xp
+      }));
+      toast({ title: '🍎 Ням-ням!', description: '+20 сытости, +5 счастья' });
+    } catch (error) {
+      toast({ title: '❌ Ошибка', description: 'Не удалось выполнить действие' });
+    }
   };
 
-  const playWithPet = () => {
+  const playWithPet = async () => {
+    if (!user) return;
     if (petStats.energy < 15) {
       toast({ title: '😴 Питомец устал', description: 'Дай ему отдохнуть' });
       return;
     }
-    setPetStats(prev => ({
-      ...prev,
-      happiness: Math.min(100, prev.happiness + 25),
-      energy: Math.max(0, prev.energy - 15),
-      xp: prev.xp + 15
-    }));
-    toast({ title: '🎮 Весело!', description: '+25 счастья, -15 энергии' });
+    
+    try {
+      const response = await fetch(PET_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'play', user_id: user.id })
+      });
+      const data = await response.json();
+      
+      setPetStats(prev => ({
+        ...prev,
+        happiness: data.happiness,
+        energy: data.energy,
+        xp: data.xp
+      }));
+      toast({ title: '🎮 Весело!', description: '+25 счастья, -15 энергии' });
+    } catch (error) {
+      toast({ title: '❌ Ошибка', description: 'Не удалось выполнить действие' });
+    }
   };
 
-  const healPet = () => {
+  const healPet = async () => {
+    if (!user) return;
     if (petStats.health >= 100) {
       toast({ title: '💪 Питомец здоров!', description: 'Лечение не требуется' });
       return;
     }
-    setPetStats(prev => ({
-      ...prev,
-      health: Math.min(100, prev.health + 30),
-      xp: prev.xp + 5
-    }));
-    toast({ title: '💊 Лечение!', description: '+30 здоровья' });
+    
+    try {
+      const response = await fetch(PET_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'heal', user_id: user.id })
+      });
+      const data = await response.json();
+      
+      setPetStats(prev => ({
+        ...prev,
+        health: data.health,
+        xp: data.xp
+      }));
+      toast({ title: '💊 Лечение!', description: '+30 здоровья' });
+    } catch (error) {
+      toast({ title: '❌ Ошибка', description: 'Не удалось выполнить действие' });
+    }
   };
 
-  const restPet = () => {
-    setPetStats(prev => ({
-      ...prev,
-      energy: Math.min(100, prev.energy + 40),
-      xp: prev.xp + 5
-    }));
-    toast({ title: '😴 Отдых!', description: '+40 энергии' });
+  const restPet = async () => {
+    if (!user) return;
+    
+    try {
+      const response = await fetch(PET_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'rest', user_id: user.id })
+      });
+      const data = await response.json();
+      
+      setPetStats(prev => ({
+        ...prev,
+        energy: data.energy,
+        xp: data.xp
+      }));
+      toast({ title: '😴 Отдых!', description: '+40 энергии' });
+    } catch (error) {
+      toast({ title: '❌ Ошибка', description: 'Не удалось выполнить действие' });
+    }
   };
 
   const buyItem = (item: any) => {
@@ -102,6 +295,65 @@ const Index = () => {
     setPetStats(prev => ({ ...prev, coins: prev.coins - item.price }));
     setInventory(prev => [...prev, item]);
     toast({ title: '✅ Куплено!', description: `${item.name} добавлен в инвентарь` });
+  };
+
+  const createTradeOffer = async () => {
+    if (!user || !selectedItem) return;
+    
+    try {
+      const response = await fetch(TRADE_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'create_offer',
+          user_id: user.id,
+          item_name: selectedItem.name,
+          item_type: selectedItem.type,
+          effect: selectedItem.effect,
+          price: selectedItem.price
+        })
+      });
+      
+      const data = await response.json();
+      
+      if (data.success) {
+        toast({ title: '✅ Предложение создано!', description: 'Ваш предмет выставлен на продажу' });
+        setShowTradeDialog(false);
+        loadTradeOffers();
+      } else {
+        toast({ title: '❌ Ошибка', description: data.error, variant: 'destructive' });
+      }
+    } catch (error) {
+      toast({ title: '❌ Ошибка', description: 'Не удалось создать предложение' });
+    }
+  };
+
+  const buyTradeOffer = async (offerId: number) => {
+    if (!user) return;
+    
+    try {
+      const response = await fetch(TRADE_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'buy',
+          user_id: user.id,
+          offer_id: offerId
+        })
+      });
+      
+      const data = await response.json();
+      
+      if (data.success) {
+        toast({ title: '✅ Покупка совершена!', description: 'Предмет добавлен в инвентарь' });
+        loadTradeOffers();
+        loadPetData(user.id);
+      } else {
+        toast({ title: '❌ Ошибка', description: data.error, variant: 'destructive' });
+      }
+    } catch (error) {
+      toast({ title: '❌ Ошибка', description: 'Не удалось совершить покупку' });
+    }
   };
 
   const StatBar = ({ label, value, icon }: any) => (
@@ -117,17 +369,92 @@ const Index = () => {
     </div>
   );
 
+  if (showAuth) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 flex items-center justify-center p-4">
+        <Card className="w-full max-w-md p-8">
+          <div className="text-center mb-6">
+            <div className="text-6xl mb-4">🐾</div>
+            <h1 className="text-3xl font-bold mb-2">Тамагочи</h1>
+            <p className="text-muted-foreground">Заботься о своём виртуальном друге</p>
+          </div>
+          
+          <Tabs value={authMode} onValueChange={(v) => setAuthMode(v as any)}>
+            <TabsList className="grid w-full grid-cols-2 mb-4">
+              <TabsTrigger value="login">Вход</TabsTrigger>
+              <TabsTrigger value="register">Регистрация</TabsTrigger>
+            </TabsList>
+            
+            <form onSubmit={handleAuth} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="email">Email</Label>
+                <Input 
+                  id="email"
+                  type="email" 
+                  placeholder="your@email.com"
+                  value={authForm.email}
+                  onChange={(e) => setAuthForm({...authForm, email: e.target.value})}
+                  required
+                />
+              </div>
+              
+              {authMode === 'register' && (
+                <div className="space-y-2">
+                  <Label htmlFor="username">Имя пользователя</Label>
+                  <Input 
+                    id="username"
+                    type="text" 
+                    placeholder="Ваше имя"
+                    value={authForm.username}
+                    onChange={(e) => setAuthForm({...authForm, username: e.target.value})}
+                  />
+                </div>
+              )}
+              
+              <div className="space-y-2">
+                <Label htmlFor="password">Пароль</Label>
+                <Input 
+                  id="password"
+                  type="password" 
+                  placeholder="••••••••"
+                  value={authForm.password}
+                  onChange={(e) => setAuthForm({...authForm, password: e.target.value})}
+                  required
+                />
+              </div>
+              
+              <Button type="submit" className="w-full">
+                {authMode === 'login' ? 'Войти' : 'Зарегистрироваться'}
+              </Button>
+            </form>
+          </Tabs>
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
       <div className="container mx-auto px-4 py-6 max-w-6xl">
         
-        <header className="mb-8 text-center">
-          <h1 className="text-4xl font-bold text-gray-900 mb-2">🐾 Тамагочи</h1>
-          <p className="text-gray-600">Заботься о своём виртуальном друге</p>
+        <header className="mb-8 flex items-center justify-between">
+          <div className="text-center flex-1">
+            <h1 className="text-4xl font-bold text-gray-900 mb-2">🐾 Тамагочи</h1>
+            <p className="text-gray-600">Заботься о своём виртуальном друге</p>
+          </div>
+          <Button variant="outline" onClick={() => {
+            localStorage.removeItem('tamagotchi_user');
+            localStorage.removeItem('tamagotchi_token');
+            setShowAuth(true);
+            setUser(null);
+          }}>
+            <Icon name="LogOut" size={16} className="mr-2" />
+            Выйти
+          </Button>
         </header>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="grid w-full grid-cols-6 mb-6">
+          <TabsList className="grid w-full grid-cols-7 mb-6">
             <TabsTrigger value="home" className="flex items-center gap-2">
               <Icon name="Home" size={16} />
               Главная
@@ -139,6 +466,10 @@ const Index = () => {
             <TabsTrigger value="shop" className="flex items-center gap-2">
               <Icon name="ShoppingBag" size={16} />
               Магазин
+            </TabsTrigger>
+            <TabsTrigger value="trade" className="flex items-center gap-2">
+              <Icon name="Users" size={16} />
+              Торговля
             </TabsTrigger>
             <TabsTrigger value="quests" className="flex items-center gap-2">
               <Icon name="Target" size={16} />
@@ -314,6 +645,91 @@ const Index = () => {
             </Card>
           </TabsContent>
 
+          <TabsContent value="trade" className="space-y-6">
+            <Card className="p-6">
+              <div className="flex items-center justify-between mb-6">
+                <h3 className="text-2xl font-bold flex items-center gap-2">
+                  <Icon name="Users" size={28} />
+                  Торговля с игроками
+                </h3>
+                <Button onClick={() => setShowTradeDialog(true)}>
+                  <Icon name="Plus" size={16} className="mr-2" />
+                  Создать предложение
+                </Button>
+              </div>
+              
+              <div className="grid md:grid-cols-3 gap-4">
+                {tradeOffers.map(offer => (
+                  <Card key={offer.id} className="p-5 hover:shadow-lg transition-shadow">
+                    <div className="text-center space-y-3">
+                      <Icon name="Package" size={40} className="mx-auto text-purple-500" />
+                      <div>
+                        <h4 className="font-bold">{offer.item_name}</h4>
+                        <p className="text-xs text-muted-foreground">
+                          от {offer.seller_name}
+                        </p>
+                        <p className="text-sm text-muted-foreground mt-1">
+                          Эффект: +{offer.effect}
+                        </p>
+                      </div>
+                      <Button 
+                        onClick={() => buyTradeOffer(offer.id)} 
+                        className="w-full"
+                        variant={petStats.coins >= offer.price ? "default" : "secondary"}
+                        disabled={petStats.coins < offer.price}
+                      >
+                        <Icon name="Coins" size={16} className="mr-2" />
+                        {offer.price}
+                      </Button>
+                    </div>
+                  </Card>
+                ))}
+                
+                {tradeOffers.length === 0 && (
+                  <div className="col-span-full text-center py-12 text-muted-foreground">
+                    <Icon name="ShoppingBag" size={48} className="mx-auto mb-4 opacity-50" />
+                    <p>Пока нет доступных предложений</p>
+                  </div>
+                )}
+              </div>
+            </Card>
+
+            <Dialog open={showTradeDialog} onOpenChange={setShowTradeDialog}>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle>Создать торговое предложение</DialogTitle>
+                  <DialogDescription>
+                    Выберите предмет из инвентаря для продажи
+                  </DialogDescription>
+                </DialogHeader>
+                
+                <div className="grid grid-cols-2 gap-3">
+                  {inventory.map(item => (
+                    <Card 
+                      key={item.id} 
+                      className={`p-4 cursor-pointer transition-all ${selectedItem?.id === item.id ? 'border-2 border-blue-500 bg-blue-50' : 'hover:border-blue-300'}`}
+                      onClick={() => setSelectedItem(item)}
+                    >
+                      <div className="text-center">
+                        <Icon name={item.icon as any} size={32} className="mx-auto mb-2" />
+                        <p className="font-medium text-sm">{item.name}</p>
+                        <p className="text-xs text-muted-foreground">Цена: {item.price}</p>
+                      </div>
+                    </Card>
+                  ))}
+                </div>
+                
+                <Button 
+                  onClick={createTradeOffer} 
+                  disabled={!selectedItem}
+                  className="w-full"
+                >
+                  Выставить на продажу
+                </Button>
+              </DialogContent>
+            </Dialog>
+          </TabsContent>
+
           <TabsContent value="quests" className="space-y-6">
             <Card className="p-6">
               <h3 className="text-2xl font-bold mb-6 flex items-center gap-2">
@@ -402,10 +818,11 @@ const Index = () => {
                 <div className="space-y-4">
                   <div className="flex items-center gap-4">
                     <div className="w-20 h-20 bg-gradient-to-br from-blue-400 to-purple-500 rounded-full flex items-center justify-center text-white text-3xl font-bold">
-                      И
+                      {user?.username?.[0]?.toUpperCase() || 'И'}
                     </div>
                     <div>
-                      <h4 className="font-bold text-lg">Игрок</h4>
+                      <h4 className="font-bold text-lg">{user?.username || 'Игрок'}</h4>
+                      <p className="text-sm text-muted-foreground">{user?.email}</p>
                       <p className="text-sm text-muted-foreground">Уровень {petStats.level}</p>
                     </div>
                   </div>
@@ -470,7 +887,7 @@ const Index = () => {
                 {[
                   { rank: 1, name: 'Мастер', level: 15, score: 2500, isYou: false },
                   { rank: 2, name: 'ПроГеймер', level: 12, score: 1800, isYou: false },
-                  { rank: 3, name: 'Игрок (Вы)', level: petStats.level, score: 950, isYou: true },
+                  { rank: 3, name: user?.username || 'Игрок (Вы)', level: petStats.level, score: 950, isYou: true },
                   { rank: 4, name: 'Новичок', level: 3, score: 450, isYou: false },
                 ].map(player => (
                   <div 
